@@ -1,10 +1,13 @@
 # Development dependency closure from uv.lock; checked by tests/quality/test_workspace.py.
 anyio==4.14.2
 certifi==2026.7.22
-colorama==0.4.6
+colorama==0.4.6 ; sys_platform == 'win32'
 h11==0.16.0
 httpcore==1.0.9
+httpcore2==2.12.0 ; sys_platform != 'emscripten'
 httpx==0.28.1
+httpx2==2.12.0
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
 idna==3.19
 iniconfig==2.3.0
 nodeenv==1.10.0
@@ -14,4 +17,5 @@ pygments==2.21.0
 pyright==1.1.411
 pytest==9.1.1
 ruff==0.16.5
+truststore==0.10.4 ; sys_platform != 'emscripten'
 typing-extensions==4.16.0

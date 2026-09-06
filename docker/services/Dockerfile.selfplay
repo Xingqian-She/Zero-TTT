@@ -54,7 +54,8 @@ RUN python -m pip install --break-system-packages --no-cache-dir \
       -c requirements.lock -c dev.requirements.lock \
       "fastapi>=0.115,<1" "uvicorn>=0.34,<1" "sgfmill==1.1.1" \
       "nicegui>=2,<4" "tensorboard>=2.18,<3" \
-      "httpx>=0.28,<1" "pyright>=1.1,<2" "pytest>=8,<10" "ruff>=0.12,<1" \
+      "httpx>=0.28,<1" "httpx2>=2.12,<3" \
+      "pyright>=1.1,<2" "pytest>=8,<10" "ruff>=0.12,<1" \
     && python -m pip install --break-system-packages --no-cache-dir --no-deps \
       -e ./packages/core -e ./packages/game -e ./packages/model -e ./packages/contracts \
       -e ./packages/worker-runtime -e ./packages/dataset \

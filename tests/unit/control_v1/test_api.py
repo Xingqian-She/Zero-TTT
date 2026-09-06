@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 from zero_ttt_contracts import HeartbeatRequest, LeaseJobRequest, WorkerCapability, WorkflowTemplate
@@ -8,15 +10,18 @@ from zero_ttt_control.store import ControlStore
 
 
 def test_openapi_and_strict_workflow_request(tmp_path) -> None:
-    client = TestClient(create_app(ControlStore(tmp_path / "control.sqlite")))
-    assert client.get("/healthz").json() == {"ok": True}
-    document = client.get("/openapi.json").json()
-    assert "/internal/v1/jobs/lease" in document["paths"]
-    response = client.post(
-        "/api/v1/workflows/data-bootstrap",
-        json={"parameters": {}, "unexpected": True},
-    )
-    assert response.status_code == 422
+    store = ControlStore(tmp_path / "control.sqlite")
+    with TestClient(create_app(store, close_store=True)) as client:
+        assert client.get("/healthz").json() == {"ok": True}
+        document = client.get("/openapi.json").json()
+        assert "/internal/v1/jobs/lease" in document["paths"]
+        response = client.post(
+            "/api/v1/workflows/data-bootstrap",
+            json={"parameters": {}, "unexpected": True},
+        )
+        assert response.status_code == 422
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        store.connection.execute("SELECT 1")
 
 
 def test_http_errors_preserve_status_and_hide_unexpected_details(tmp_path, monkeypatch, caplog):
@@ -42,6 +47,24 @@ def test_http_errors_preserve_status_and_hide_unexpected_details(tmp_path, monke
         assert response.status_code == 500
         assert response.json() == {"detail": "Internal Server Error"}
         assert "private database location" in caplog.text
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        store.connection.execute("SELECT 1")
+
+
+def test_unexpected_errors_propagate_and_close_store(tmp_path, monkeypatch):
+    store = ControlStore(tmp_path / "control.sqlite")
+
+    def unexpected():
+        raise RuntimeError("private database location")
+
+    monkeypatch.setattr(store, "snapshot", unexpected)
+    with (
+        pytest.raises(RuntimeError, match="private database location"),
+        TestClient(create_app(store, close_store=True)) as client,
+    ):
+        client.get("/api/v1/snapshot")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        store.connection.execute("SELECT 1")
 
 
 @pytest.mark.parametrize(
