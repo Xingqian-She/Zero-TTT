@@ -12,5 +12,5 @@
 OpenAPI 与 JSON Schema 由代码生成，不在文档中维护重复字段表：
 
 ```powershell
-docker compose run --rm dev python scripts/generate_contracts.py --check
+docker compose run --rm --no-deps test python scripts/generate_contracts.py --check
 ```

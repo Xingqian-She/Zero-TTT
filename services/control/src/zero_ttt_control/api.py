@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Header, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from zero_ttt_contracts import (
     CompleteJobRequest,
@@ -45,14 +46,19 @@ class SubmitWorkflowRequest(RequestModel):
     idempotency_key: str | None = None
 
 
-def _error(error: Exception) -> HTTPException:
+async def _handle_error(request: Request, error: Exception) -> JSONResponse:
     if isinstance(error, KeyError):
-        return HTTPException(404, str(error))
-    if isinstance(error, LeaseConflict):
-        return HTTPException(409, str(error))
-    if isinstance(error, ValueError | sqlite3.IntegrityError):
-        return HTTPException(422, str(error))
-    return HTTPException(500, str(error))
+        status = 404
+    elif isinstance(error, LeaseConflict):
+        status = 409
+    elif isinstance(error, ValueError | sqlite3.IntegrityError):
+        status = 422
+    else:
+        logging.getLogger(__name__).error(
+            "Unhandled Control error: %s %s", request.method, request.url.path, exc_info=error
+        )
+        return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+    return JSONResponse({"detail": str(error)}, status_code=status)
 
 
 def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
@@ -72,6 +78,8 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
                 store.close()
 
     app = FastAPI(title="Zero-TTT Control API", version="1.0.0", lifespan=lifespan)
+    for error_type in (KeyError, LeaseConflict, ValueError, sqlite3.IntegrityError, Exception):
+        app.add_exception_handler(error_type, _handle_error)
 
     @app.get("/healthz")
     def health() -> dict[str, bool]:
@@ -87,10 +95,7 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.get("/api/v1/runs/{run_id}")
     def run(run_id: str) -> dict[str, Any]:
-        try:
-            return store.get_run(run_id).model_dump(mode="json")
-        except Exception as error:
-            raise _error(error) from error
+        return store.get_run(run_id).model_dump(mode="json")
 
     @app.get("/api/v1/profiles")
     def list_profiles() -> dict[str, Any]:
@@ -99,28 +104,22 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
     @app.post("/api/v1/runs", status_code=201)
     def create_run(request: CreateRunRequest) -> dict[str, Any]:
         try:
-            cold = next(
-                ref
-                for ref in store.list_artifacts("dataset-snapshot")
-                if ref.artifact_id == request.cold_snapshot_id
-            )
-            if cold.labels.get("split") != "train":
-                raise ValueError("cold-start requires a train snapshot")
-            profile = profiles.load(request.profile_id)
-            profile_sha = payload_sha256(profile)
-            spec = RunSpec(
-                run_id=uuid.uuid4().hex,
-                name=request.name.strip(),
-                profile_id=request.profile_id,
-                profile_sha256=profile_sha,
-                profile=profile,
-                cold_snapshot=cold,
-            )
-            return store.create_run(spec).model_dump(mode="json")
-        except Exception as error:
-            if isinstance(error, StopIteration):
-                error = KeyError(f"unknown snapshot {request.cold_snapshot_id}")
-            raise _error(error) from error
+            cold = store.get_artifact(request.cold_snapshot_id, kind="dataset-snapshot")
+        except KeyError as error:
+            raise KeyError(f"unknown snapshot {request.cold_snapshot_id}") from error
+        if cold.labels.get("split") != "train":
+            raise ValueError("cold-start requires a train snapshot")
+        profile = profiles.load(request.profile_id)
+        profile_sha = payload_sha256(profile)
+        spec = RunSpec(
+            run_id=uuid.uuid4().hex,
+            name=request.name.strip(),
+            profile_id=request.profile_id,
+            profile_sha256=profile_sha,
+            profile=profile,
+            cold_snapshot=cold,
+        )
+        return store.create_run(spec).model_dump(mode="json")
 
     @app.get("/api/v1/workflows")
     def workflows() -> dict[str, Any]:
@@ -128,25 +127,19 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.get("/api/v1/workflows/{workflow_id}")
     def workflow(workflow_id: str) -> dict[str, Any]:
-        try:
-            return store.get_workflow(workflow_id)
-        except Exception as error:
-            raise _error(error) from error
+        return store.get_workflow(workflow_id)
 
     @app.post("/api/v1/workflows/{template}", status_code=202)
     def submit_workflow(
         template: WorkflowTemplate, request: SubmitWorkflowRequest
     ) -> dict[str, str]:
-        try:
-            workflow_id = store.submit_workflow(
-                template,
-                request.parameters,
-                run_id=request.run_id,
-                idempotency_key=request.idempotency_key,
-            )
-            return {"workflow_id": workflow_id}
-        except Exception as error:
-            raise _error(error) from error
+        workflow_id = store.submit_workflow(
+            template,
+            request.parameters,
+            run_id=request.run_id,
+            idempotency_key=request.idempotency_key,
+        )
+        return {"workflow_id": workflow_id}
 
     @app.get("/api/v1/jobs")
     def jobs(workflow_id: str | None = None) -> dict[str, Any]:
@@ -154,26 +147,17 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.get("/api/v1/jobs/{job_id}")
     def job(job_id: str) -> dict[str, Any]:
-        try:
-            return store.get_job(job_id)
-        except Exception as error:
-            raise _error(error) from error
+        return store.get_job(job_id)
 
     @app.post("/api/v1/jobs/{job_id}/cancel", status_code=202)
     def cancel(job_id: str) -> dict[str, str]:
-        try:
-            store.cancel(job_id)
-            return {"job_id": job_id}
-        except Exception as error:
-            raise _error(error) from error
+        store.cancel(job_id)
+        return {"job_id": job_id}
 
     @app.post("/api/v1/jobs/{job_id}/retry", status_code=202)
     def retry(job_id: str) -> dict[str, str]:
-        try:
-            store.retry(job_id)
-            return {"job_id": job_id}
-        except Exception as error:
-            raise _error(error) from error
+        store.retry(job_id)
+        return {"job_id": job_id}
 
     @app.get("/api/v1/artifacts")
     def artifacts(kind: str | None = None) -> dict[str, Any]:
@@ -189,10 +173,7 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.get("/api/v1/datasets/{artifact_id}")
     def dataset(artifact_id: str) -> dict[str, Any]:
-        try:
-            return store.get_artifact(artifact_id, kind="dataset-snapshot").model_dump(mode="json")
-        except Exception as error:
-            raise _error(error) from error
+        return store.get_artifact(artifact_id, kind="dataset-snapshot").model_dump(mode="json")
 
     @app.get("/api/v1/publications")
     def publications() -> dict[str, Any]:
@@ -204,10 +185,7 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.get("/api/v1/publications/{artifact_id}")
     def publication(artifact_id: str) -> dict[str, Any]:
-        try:
-            return store.get_artifact(artifact_id, kind="publication").model_dump(mode="json")
-        except Exception as error:
-            raise _error(error) from error
+        return store.get_artifact(artifact_id, kind="publication").model_dump(mode="json")
 
     @app.get("/api/v1/events")
     def events(after: int = 0, limit: int = Query(500, ge=1, le=2000)) -> dict[str, Any]:
@@ -235,22 +213,16 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
 
     @app.post("/internal/v1/jobs/lease")
     async def lease_job(request: LeaseJobRequest) -> dict[str, Any]:
-        try:
-            deadline = asyncio.get_running_loop().time() + request.wait_seconds
-            while True:
-                job = store.lease_job(request)
-                if job is not None or asyncio.get_running_loop().time() >= deadline:
-                    return {"job": None if job is None else job.model_dump(mode="json")}
-                await asyncio.sleep(0.25)
-        except Exception as error:
-            raise _error(error) from error
+        deadline = asyncio.get_running_loop().time() + request.wait_seconds
+        while True:
+            job = store.lease_job(request)
+            if job is not None or asyncio.get_running_loop().time() >= deadline:
+                return {"job": None if job is None else job.model_dump(mode="json")}
+            await asyncio.sleep(0.25)
 
     @app.post("/internal/v1/jobs/{job_id}/heartbeat")
     def heartbeat(job_id: str, request: HeartbeatRequest) -> dict[str, Any]:
-        try:
-            return store.heartbeat(job_id, request).model_dump(mode="json")
-        except Exception as error:
-            raise _error(error) from error
+        return store.heartbeat(job_id, request).model_dump(mode="json")
 
     @app.post("/internal/v1/jobs/{job_id}/events", status_code=202)
     def append_event(
@@ -259,25 +231,16 @@ def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
         x_worker_id: str = Header(),
         x_lease_token: str = Header(),
     ) -> dict[str, int]:
-        try:
-            return {"sequence": store.append_event(job_id, x_worker_id, x_lease_token, event)}
-        except Exception as error:
-            raise _error(error) from error
+        return {"sequence": store.append_event(job_id, x_worker_id, x_lease_token, event)}
 
     @app.post("/internal/v1/jobs/{job_id}/complete", status_code=202)
     def complete(job_id: str, request: CompleteJobRequest) -> dict[str, str]:
-        try:
-            store.complete(job_id, request)
-            return {"job_id": job_id}
-        except Exception as error:
-            raise _error(error) from error
+        store.complete(job_id, request)
+        return {"job_id": job_id}
 
     @app.post("/internal/v1/jobs/{job_id}/fail", status_code=202)
     def fail(job_id: str, request: FailJobRequest) -> dict[str, str]:
-        try:
-            store.fail(job_id, request)
-            return {"job_id": job_id}
-        except Exception as error:
-            raise _error(error) from error
+        store.fail(job_id, request)
+        return {"job_id": job_id}
 
     return app

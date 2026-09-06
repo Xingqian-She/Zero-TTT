@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from zero_ttt.config import load_config
 from zero_ttt.game.rules import BOARD_SIZE, PASS_ACTION, Color
 from zero_ttt.game.state import GameState

@@ -13,7 +13,6 @@ class ControlSettings:
     profile_root: Path
     host: str
     port: int
-    default_lease_seconds: int
 
     @classmethod
     def from_environment(cls) -> ControlSettings:
@@ -24,5 +23,4 @@ class ControlSettings:
             profile_root=Path(os.environ.get("ZERO_TTT_PROFILE_ROOT", "/profiles")),
             host=os.environ.get("ZERO_TTT_CONTROL_HOST", "0.0.0.0"),
             port=int(os.environ.get("ZERO_TTT_CONTROL_PORT", "8090")),
-            default_lease_seconds=int(os.environ.get("ZERO_TTT_LEASE_SECONDS", "60")),
         )

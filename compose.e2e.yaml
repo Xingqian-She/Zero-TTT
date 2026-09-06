@@ -1,5 +1,6 @@
 services:
   control:
+    ports: !reset []
     volumes:
       - e2e-control-state:/state/control
       - type: bind
@@ -28,8 +29,12 @@ services:
       - e2e-selfplay-artifacts:/artifacts/selfplay
 
   tensorboard:
+    ports: !reset []
     volumes:
       - e2e-model-artifacts:/artifacts/models:ro
+
+  ui:
+    ports: !reset []
 
   dev:
     volumes:

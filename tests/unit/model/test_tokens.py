@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-
 from zero_ttt.model.tokens import TokenLayout
 
 

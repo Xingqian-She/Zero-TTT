@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 import zero_ttt._io as io_helpers
 from zero_ttt._io import (
     atomic_write_bytes,

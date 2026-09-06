@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from zero_ttt.game.rules import (
     BOARD_AREA,
     BOARD_SIZE,

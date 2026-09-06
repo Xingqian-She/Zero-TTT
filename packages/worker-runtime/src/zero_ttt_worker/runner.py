@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import traceback
 from collections.abc import Callable
@@ -21,6 +22,8 @@ from zero_ttt_contracts import (
 )
 
 from zero_ttt_worker.client import ControlClient, ControlClientError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +92,7 @@ class WorkerRunner:
     def request_stop(self) -> None:
         self._stop.set()
 
-    def run_forever(self) -> None:
+    def _register(self) -> None:
         self.client.register(
             WorkerRegistration(
                 worker_id=self.worker_id,
@@ -97,37 +100,38 @@ class WorkerRunner:
                 version=self.version,
             )
         )
-        while not self._stop.is_set():
-            try:
-                job = self.client.lease(
-                    LeaseJobRequest(
-                        worker_id=self.worker_id,
-                        capability=self.capability,
-                        lease_seconds=self.lease_seconds,
-                    )
-                )
-                if job is None:
-                    self._stop.wait(self.idle_seconds)
-                    continue
-                self._execute(job)
-            except ControlClientError:
-                self._stop.wait(self.idle_seconds)
 
-    def run_once(self) -> bool:
-        self.client.register(
-            WorkerRegistration(
-                worker_id=self.worker_id,
-                capability=self.capability,
-                version=self.version,
-            )
-        )
-        job = self.client.lease(
+    def _lease(self) -> JobEnvelope | None:
+        return self.client.lease(
             LeaseJobRequest(
                 worker_id=self.worker_id,
                 capability=self.capability,
                 lease_seconds=self.lease_seconds,
             )
         )
+
+    def run_forever(self) -> None:
+        registered = False
+        while not self._stop.is_set():
+            try:
+                if not registered:
+                    self._register()
+                    registered = True
+                if self._stop.is_set():
+                    break
+                job = self._lease()
+                if job is None:
+                    self._stop.wait(self.idle_seconds)
+                    continue
+                # A lease already in flight when stopping is still ours to finish.
+                self._execute(job)
+            except ControlClientError as error:
+                logger.warning("Worker %s could not contact Control: %s", self.worker_id, error)
+                self._stop.wait(self.idle_seconds)
+
+    def run_once(self) -> bool:
+        self._register()
+        job = self._lease()
         if job is None:
             return False
         self._execute(job)
@@ -160,33 +164,40 @@ class WorkerRunner:
                     artifacts=result.artifacts,
                 ),
             )
-        except BaseException as error:
-            retryable = not isinstance(error, ValueError | TypeError)
-            try:
-                context.emit(
-                    "job.failed",
-                    {
-                        "error_type": type(error).__name__,
-                        "message": str(error),
-                        "traceback": "".join(traceback.format_exception(error))[-8000:],
-                    },
-                    level=EventLevel.ERROR,
-                )
-                self.client.fail(
-                    job.job_id,
-                    FailJobRequest(
-                        worker_id=self.worker_id,
-                        lease_token=job.lease_token,
-                        error_type=type(error).__name__,
-                        message=str(error),
-                        retryable=retryable,
-                    ),
-                )
-            except ControlClientError:
-                pass
+        except Exception as error:
+            self._report_failure(job, context, error)
         finally:
             heartbeat_stop.set()
-            heartbeat.join(timeout=max(self.lease_seconds / 2, 1.0))
+            # Wait for any in-flight HTTP renewal to finish before reusing this runner.
+            heartbeat.join()
+
+    def _report_failure(self, job: JobEnvelope, context: JobContext, error: Exception) -> None:
+        logger.error("Job %s failed", job.job_id, exc_info=error)
+        try:
+            context.emit(
+                "job.failed",
+                {
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                    "traceback": "".join(traceback.format_exception(error))[-8000:],
+                },
+                level=EventLevel.ERROR,
+            )
+        except ControlClientError as report_error:
+            logger.warning("Could not report failure event for %s: %s", job.job_id, report_error)
+        try:
+            self.client.fail(
+                job.job_id,
+                FailJobRequest(
+                    worker_id=self.worker_id,
+                    lease_token=job.lease_token,
+                    error_type=type(error).__name__,
+                    message=str(error),
+                    retryable=not isinstance(error, ValueError | TypeError),
+                ),
+            )
+        except ControlClientError as report_error:
+            logger.warning("Could not report failed job %s: %s", job.job_id, report_error)
 
     def _heartbeat(
         self,
@@ -207,6 +218,7 @@ class WorkerRunner:
                 )
                 if status.cancel_requested:
                     context.request_cancel()
-            except ControlClientError:
+            except ControlClientError as error:
+                logger.warning("Job %s lost lease renewal: %s", job.job_id, error)
                 context.request_cancel()
                 return

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import torch
-
 from zero_ttt.precision import configure_strict_fp32
 
 

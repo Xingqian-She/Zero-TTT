@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 import torch
 from torch import nn
-
 from zero_ttt.config import load_config
 from zero_ttt.model import PolicyValueTransformer
 from zero_ttt.model.base import BasePolicyValueModel

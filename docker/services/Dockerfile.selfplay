@@ -43,17 +43,27 @@ ENV ZERO_TTT_OPEN_SPIEL_REVISION=112b77704631fc2ce7ad8e4581f6ca09798ce15a
 CMD ["zero-ttt-selfplay-worker"]
 
 FROM selfplay AS dev
+COPY docker/services/dev.requirements.lock ./dev.requirements.lock
 COPY services ./services
 COPY configs ./configs
 COPY scripts ./scripts
 COPY tests ./tests
 COPY tools ./tools
 COPY pyproject.toml uv.lock README.md ./
-RUN python -m pip install --break-system-packages --no-cache-dir -c requirements.lock \
+RUN python -m pip install --break-system-packages --no-cache-dir \
+      -c requirements.lock -c dev.requirements.lock \
       "fastapi>=0.115,<1" "uvicorn>=0.34,<1" "sgfmill==1.1.1" \
       "nicegui>=2,<4" "tensorboard>=2.18,<3" \
       "httpx>=0.28,<1" "pyright>=1.1,<2" "pytest>=8,<10" "ruff>=0.12,<1" \
     && python -m pip install --break-system-packages --no-cache-dir --no-deps \
-    ./services/control ./services/data ./services/trainer ./services/ui ./tools/admin-cli \
+      -e ./packages/core -e ./packages/game -e ./packages/model -e ./packages/contracts \
+      -e ./packages/worker-runtime -e ./packages/dataset \
+      -e ./services/control -e ./services/data -e ./services/trainer \
+      -e ./services/selfplay -e ./services/ui -e ./tools/admin-cli \
+    && python -m nodeenv --node=26.8.1 /opt/pyright-node \
     && python -c "import pyspiel, torch; assert torch.__version__ == '2.13.0+cu132'; print(pyspiel.__doc__ is not None)"
+ENV PATH="/opt/pyright-node/bin:${PATH}" \
+    PYTEST_ADDOPTS="-o cache_dir=/tmp/pytest-cache" \
+    RUFF_CACHE_DIR=/tmp/ruff-cache
+RUN pyright --version
 CMD ["/bin/bash"]

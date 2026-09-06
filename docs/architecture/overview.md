@@ -30,3 +30,11 @@ flowchart LR
 
 `packages/contracts` 不依赖 Torch 或任何服务；`packages/game`、`packages/model` 与
 `packages/dataset` 提供明确的算法和只读格式边界。`services/*` 之间禁止 Python 导入。
+
+Control 内部由三部分协作：`ControlSession` 管理连接、共享连接锁和原子写事务；
+`workflow_steps` 与 `workflow_state` 只描述有限流程及状态规则；`ControlStore` 协调作业、
+租约、产物引用和查询。工作流提交的幂等查询与创建共用事务，取消、重试与工作流状态更新
+也必须整体提交或回滚。新增流程应先扩展契约枚举和纯规则，再实现对应 Worker 处理器。
+
+`packages/worker-runtime` 负责 HTTP 领取、心跳、结果上报和进程排空退出；业务处理器只接收
+`JobEnvelope` 与 `JobContext` 并返回 `JobResult`。生产 Worker 注册版本来自安装包元数据。

@@ -15,7 +15,6 @@ services:
       ZERO_TTT_PROFILE_ROOT: /profiles
       ZERO_TTT_CONTROL_HOST: 0.0.0.0
       ZERO_TTT_CONTROL_PORT: "8090"
-      ZERO_TTT_LEASE_SECONDS: "60"
     volumes:
       - type: bind
         source: ${ZERO_TTT_DATA_ROOT:-D:/datasets/Zero-TTT}/state/control
@@ -43,6 +42,7 @@ services:
     image: zero-ttt/data:1.0.0
     init: true
     restart: unless-stopped
+    stop_grace_period: 30m
     environment:
       ZERO_TTT_CONTROL_URL: http://control:8090
       ZERO_TTT_WORKER_ID: data-1
@@ -178,7 +178,7 @@ services:
 
   dev:
     profiles: ["dev"]
-    build:
+    build: &dev-build
       context: .
       dockerfile: docker/services/Dockerfile.selfplay
       target: dev
@@ -195,3 +195,20 @@ services:
         source: ${ZERO_TTT_DATA_ROOT:-D:/datasets/Zero-TTT}
         target: /datasets
     command: ["/bin/bash"]
+
+  test:
+    profiles: ["dev"]
+    build: *dev-build
+    image: zero-ttt/dev:1.0.0
+    working_dir: /workspace
+    init: true
+    network_mode: none
+    shm_size: 8gb
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace
+        read_only: true
+    tmpfs:
+      - /tmp
+    command: ["python", "-m", "pytest", "-q"]

@@ -5,7 +5,6 @@ from dataclasses import replace
 import torch
 from torch import nn
 from torch.nn import functional as F
-
 from zero_ttt.config import load_config
 from zero_ttt.game.rules import BOARD_AREA
 from zero_ttt.model.execution import BlockExecutor

@@ -4,22 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from zero_ttt_contracts import ArtifactRef, DomainEvent, JobEnvelope, RunSpec
+from zero_ttt_control.api import create_app
+from zero_ttt_control.store import ControlStore
+
 ROOT = Path(__file__).resolve().parents[1]
-for source_root in (
-    ROOT / "packages" / "contracts" / "src",
-    ROOT / "services" / "control" / "src",
-):
-    sys.path.insert(0, str(source_root))
-
-from zero_ttt_contracts import ArtifactRef, DomainEvent, JobEnvelope, RunSpec  # noqa: E402
-from zero_ttt_control.api import create_app  # noqa: E402
-from zero_ttt_control.store import ControlStore  # noqa: E402
-
 OUTPUT = ROOT / "generated" / "contracts"
 
 
