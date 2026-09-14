@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, Query, Request
@@ -64,7 +65,7 @@ async def _handle_error(request: Request, error: Exception) -> JSONResponse:
 def create_app(  # noqa: C901 - route assembly keeps API dependencies explicit
     store: ControlStore,
     *,
-    profile_root: str = "configs/profiles",
+    profile_root: str | Path = "configs/profiles",
     close_store: bool = False,
 ) -> FastAPI:
     profiles = ProfileRepository(profile_root)

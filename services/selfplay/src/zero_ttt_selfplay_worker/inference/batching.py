@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from zero_ttt.game.features import encode_position
 from zero_ttt.game.state import GameState
 
@@ -19,9 +20,9 @@ from zero_ttt_selfplay_worker.inference.contracts import InferenceBatch, Positio
 
 @dataclass(frozen=True, slots=True)
 class StateEvaluation:
-    policy_logits: np.ndarray
+    policy_logits: NDArray[np.float32]
     value: float
-    ownership: np.ndarray | None
+    ownership: NDArray[np.float32] | None
     score_margin: float | None
 
 
@@ -188,7 +189,7 @@ class BatchedInferenceBroker:
         tensor: torch.Tensor | None,
         *,
         reshape: int | None = None,
-    ) -> np.ndarray | None:
+    ) -> NDArray[np.generic] | None:
         if tensor is None:
             return None
         value = tensor.detach()

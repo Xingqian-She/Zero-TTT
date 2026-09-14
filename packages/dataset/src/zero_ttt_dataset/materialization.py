@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TypeVar, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt.config import GameConfig
 from zero_ttt.game.features import GLOBAL_FEATURES, POINT_FEATURES, encode_position
 from zero_ttt.game.rules import ACTION_SIZE, BOARD_AREA, BOARD_SIZE, Color
@@ -49,16 +50,16 @@ class ShardRecordCache:
 
 @dataclass(slots=True)
 class _BatchArrays:
-    boards: np.ndarray
-    globals: np.ndarray
-    legal: np.ndarray
-    policies: np.ndarray
-    values: np.ndarray
-    ownerships: np.ndarray
-    scores: np.ndarray
-    value_masks: np.ndarray
-    ownership_masks: np.ndarray
-    score_masks: np.ndarray
+    boards: NDArray[np.float32]
+    globals: NDArray[np.float32]
+    legal: NDArray[np.bool_]
+    policies: NDArray[np.float32]
+    values: NDArray[np.float32]
+    ownerships: NDArray[np.float32]
+    scores: NDArray[np.float32]
+    value_masks: NDArray[np.bool_]
+    ownership_masks: NDArray[np.bool_]
+    score_masks: NDArray[np.bool_]
 
     @classmethod
     def allocate(cls, batch_size: int) -> _BatchArrays:
@@ -92,9 +93,9 @@ class _BatchArrays:
 
 @dataclass(slots=True)
 class _SampleTargets:
-    policy: np.ndarray
+    policy: NDArray[np.float32]
     value: np.float32
-    ownership: np.ndarray
+    ownership: NDArray[np.float32]
     score: np.float32
     value_mask: bool
     ownership_mask: bool

@@ -29,6 +29,21 @@ def test_synthetic_source_implements_training_boundary() -> None:
     batch = SyntheticBatchSource().next_batch(3, np.random.default_rng(4))
     assert isinstance(batch, TrainBatch)
     assert batch.board.shape == (3, 25, BOARD_SIZE, BOARD_SIZE)
+    assert all(
+        array.dtype == np.float32
+        for array in (
+            batch.board,
+            batch.global_features,
+            batch.policy,
+            batch.value,
+            batch.ownership,
+            batch.score_margin,
+        )
+    )
+    assert all(
+        array.dtype == np.bool_
+        for array in (batch.legal, batch.value_mask, batch.ownership_mask, batch.score_mask)
+    )
     assert np.allclose(batch.policy.sum(axis=1), 1.0)
 
 

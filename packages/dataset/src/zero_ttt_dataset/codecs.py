@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt.versioning import RECORD_SCHEMA, SHARD_SCHEMA
 
 from zero_ttt_dataset.records import AnnotationRecord, TrajectoryRecord
 
+NpzArrays = dict[str, NDArray[np.generic]]
 
-def _hex_matrix(values: Sequence[str]) -> np.ndarray:
+
+def _hex_matrix(values: Sequence[str]) -> NDArray[np.uint8]:
     if not values:
         return np.empty((0, 32), dtype=np.uint8)
     return np.asarray([list(bytes.fromhex(value)) for value in values], dtype=np.uint8)
 
 
-def _pack_text(prefix: str, values: Sequence[str]) -> dict[str, np.ndarray]:
+def _pack_text(prefix: str, values: Sequence[str]) -> NpzArrays:
     encoded = [value.encode("utf-8") for value in values]
     offsets = np.zeros(len(encoded) + 1, dtype=np.int64)
     if encoded:
@@ -35,9 +37,9 @@ def _unpack_text(archive: np.lib.npyio.NpzFile, prefix: str) -> list[str]:
     ]
 
 
-def _concatenate_int(
-    rows: Sequence[tuple[int, ...]], dtype: np.dtype[Any]
-) -> tuple[np.ndarray, np.ndarray]:
+def _concatenate_int[ScalarT: np.generic](
+    rows: Sequence[tuple[int, ...]], dtype: np.dtype[ScalarT]
+) -> tuple[NDArray[np.int64], NDArray[ScalarT]]:
     offsets = np.zeros(len(rows) + 1, dtype=np.int64)
     if rows:
         offsets[1:] = np.cumsum([len(row) for row in rows], dtype=np.int64)
@@ -52,7 +54,7 @@ def _concatenate_int(
 class TrajectoryNpzCodec:
     kind_code = 1
 
-    def encode(self, records: Sequence[TrajectoryRecord]) -> dict[str, np.ndarray]:
+    def encode(self, records: Sequence[TrajectoryRecord]) -> NpzArrays:
         if not records:
             raise ValueError("cannot write an empty trajectory shard")
         if any(record.schema_version != RECORD_SCHEMA.current for record in records):
@@ -65,7 +67,7 @@ class TrajectoryNpzCodec:
             [record.trainable_position_count for record in records], dtype=np.int64
         )
         policy_row_offsets, policy_actions, policy_values = self._policies(records)
-        arrays: dict[str, np.ndarray] = {
+        arrays: NpzArrays = {
             "schema_version": np.asarray(SHARD_SCHEMA.current, dtype=np.int32),
             "record_schema_version": np.asarray(RECORD_SCHEMA.current, dtype=np.int32),
             "kind": np.asarray(self.kind_code, dtype=np.uint8),
@@ -131,7 +133,7 @@ class TrajectoryNpzCodec:
     @staticmethod
     def _policies(
         records: Sequence[TrajectoryRecord],
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[NDArray[np.int64], NDArray[np.int16], NDArray[np.float32]]:
         row_offsets = [0]
         actions: list[int] = []
         values: list[float] = []
@@ -147,7 +149,9 @@ class TrajectoryNpzCodec:
         )
 
     @staticmethod
-    def _flat(records: Sequence[TrajectoryRecord], field: str, dtype: Any) -> np.ndarray:
+    def _flat[ScalarT: np.generic](
+        records: Sequence[TrajectoryRecord], field: str, dtype: type[ScalarT]
+    ) -> NDArray[ScalarT]:
         return np.asarray(
             [value for record in records for value in getattr(record, field)],
             dtype=dtype,
@@ -241,7 +245,7 @@ class TrajectoryNpzCodec:
 class AnnotationNpzCodec:
     kind_code = 2
 
-    def encode(self, records: Sequence[AnnotationRecord]) -> dict[str, np.ndarray]:
+    def encode(self, records: Sequence[AnnotationRecord]) -> NpzArrays:
         if not records:
             raise ValueError("cannot write an empty annotation shard")
         if any(record.schema_version != RECORD_SCHEMA.current for record in records):
@@ -249,7 +253,7 @@ class AnnotationNpzCodec:
         policy_offsets, policy_actions = _concatenate_int(
             [record.policy_actions for record in records], np.dtype(np.int16)
         )
-        arrays: dict[str, np.ndarray] = {
+        arrays: NpzArrays = {
             "schema_version": np.asarray(SHARD_SCHEMA.current, dtype=np.int32),
             "record_schema_version": np.asarray(RECORD_SCHEMA.current, dtype=np.int32),
             "kind": np.asarray(self.kind_code, dtype=np.uint8),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pytest
 import torch
 from zero_ttt.config import load_config
@@ -64,6 +65,9 @@ def test_broker_flushes_partial_batch_without_deadlock() -> None:
     with BatchedInferenceBroker(evaluator, batch_size=16, batch_wait_ms=0, cache_size=4) as broker:
         result = broker.evaluate(GameState.new(config.game))
         assert result.policy_logits.shape == (362,)
+        assert result.policy_logits.dtype == np.float32
+        assert result.ownership is not None
+        assert result.ownership.dtype == np.float32
         assert evaluator.calls == [1]
 
 

@@ -33,4 +33,6 @@ def test_scale_gradient_is_forward_identity_with_scaled_backward(scale: float) -
     assert torch.equal(output, source)
 
     output.sum().backward()
-    assert torch.equal(source.grad, torch.full_like(source, scale))
+    source_gradient = source.grad
+    assert source_gradient is not None
+    assert torch.equal(source_gradient, torch.full_like(source, scale))

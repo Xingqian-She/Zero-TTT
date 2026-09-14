@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt._io import fsync_directory, sha256_file
 
 from zero_ttt_dataset.codecs import (
@@ -19,6 +20,7 @@ from zero_ttt_dataset.codecs import (
 from zero_ttt_dataset.records import AnnotationRecord, TrajectoryRecord
 
 ShardKind = Literal["trajectory", "annotation"]
+NpzArrays = dict[str, NDArray[np.generic]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +130,7 @@ class ShardStore:
     def _write(
         self,
         kind: ShardKind,
-        arrays: dict[str, np.ndarray],
+        arrays: NpzArrays,
         record_count: int,
         position_count: int,
     ) -> ShardInfo:
@@ -160,7 +162,7 @@ class ShardStore:
                 temporary.unlink()
 
     @staticmethod
-    def _save_npz(descriptor: int, temporary: Path, arrays: dict[str, np.ndarray]) -> None:
+    def _save_npz(descriptor: int, temporary: Path, arrays: NpzArrays) -> None:
         with os.fdopen(descriptor, "wb") as handle:
             cast(Any, np.savez)(handle, **arrays)
             handle.flush()

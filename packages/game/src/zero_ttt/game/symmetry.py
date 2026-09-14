@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt.game.features import PositionFeatures
 from zero_ttt.game.rules import BOARD_AREA, BOARD_SIZE, PASS_ACTION
 
@@ -26,7 +27,9 @@ def transform_point(point: int, symmetry: int) -> int:
     return row * BOARD_SIZE + col
 
 
-def transform_spatial(array: np.ndarray, symmetry: int) -> np.ndarray:
+def transform_spatial[ScalarT: np.generic](
+    array: NDArray[ScalarT], symmetry: int
+) -> NDArray[ScalarT]:
     if not 0 <= symmetry < SYMMETRY_COUNT:
         raise ValueError("symmetry must be in [0, 8)")
     result = array
@@ -37,7 +40,9 @@ def transform_spatial(array: np.ndarray, symmetry: int) -> np.ndarray:
     return np.ascontiguousarray(result)
 
 
-def transform_action_vector(vector: np.ndarray, symmetry: int) -> np.ndarray:
+def transform_action_vector[ScalarT: np.generic](
+    vector: NDArray[ScalarT], symmetry: int
+) -> NDArray[ScalarT]:
     if vector.shape[-1] != BOARD_AREA + 1:
         raise ValueError("action vector must end in 362 entries")
     result = np.empty_like(vector)
@@ -50,14 +55,14 @@ def transform_action_vector(vector: np.ndarray, symmetry: int) -> np.ndarray:
 @dataclass(frozen=True, slots=True)
 class AugmentedSample:
     features: PositionFeatures
-    policy: np.ndarray
-    ownership: np.ndarray
+    policy: NDArray[np.float32]
+    ownership: NDArray[np.float32]
 
 
 def augment_sample(
     features: PositionFeatures,
-    policy: np.ndarray,
-    ownership: np.ndarray,
+    policy: NDArray[np.float32],
+    ownership: NDArray[np.float32],
     symmetry: int,
 ) -> AugmentedSample:
     board = transform_spatial(features.board, symmetry)

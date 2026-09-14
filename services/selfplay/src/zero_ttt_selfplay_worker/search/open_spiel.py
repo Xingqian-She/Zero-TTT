@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pyspiel
+from numpy.typing import NDArray
 from open_spiel.python.algorithms import mcts
 from zero_ttt.config import GameConfig, SearchConfig
 from zero_ttt.game.rules import ACTION_SIZE, BOARD_SIZE, PASS_ACTION, Color
@@ -167,7 +168,7 @@ class OpenSpielEvaluator(mcts.Evaluator):
             (int(action), float(mass)) for action, mass in zip(legal_actions, masses, strict=True)
         ]
 
-    def evaluate(self, state: pyspiel.State) -> np.ndarray:
+    def evaluate(self, state: pyspiel.State) -> NDArray[np.float32]:
         local = self._local(state)
         current_value = self.broker.evaluate(local).value
         black_value = current_value if local.to_play is Color.BLACK else -current_value
@@ -188,7 +189,7 @@ class MCTSSearchResult:
 
 
 def _select_action(
-    visits: np.ndarray,
+    visits: NDArray[np.int64],
     move_number: int,
     config: SearchConfig,
     selection_seed: int,

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zero_ttt_dataset.locators import AnnotationLocator, TrajectoryLocator
 
@@ -24,7 +25,7 @@ class SampleReference:
 class _TrajectoryBucket:
     shard_sha256: str
     trajectories: tuple[TrajectoryLocator, ...]
-    cumulative_positions: np.ndarray
+    cumulative_positions: NDArray[np.int64]
     position_count: int
 
 

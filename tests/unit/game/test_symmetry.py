@@ -27,6 +27,10 @@ def test_d4_action_and_sample_transforms_are_consistent() -> None:
         assert transformed.policy[expected_action] == policy[point(2, 5)]
         assert transformed.ownership[expected_action] == ownership[point(2, 5)]
         assert transformed.policy[PASS_ACTION] == policy[PASS_ACTION]
+        assert transformed.features.board.dtype == features.board.dtype
+        assert transformed.features.legal.dtype == features.legal.dtype
+        assert transformed.policy.dtype == policy.dtype
+        assert transformed.ownership.dtype == ownership.dtype
         assert np.array_equal(
             transformed.features.legal,
             transform_action_vector(features.legal, symmetry),

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt.game.rules import BOARD_AREA, BOARD_SIZE, Color, analyze_board
 from zero_ttt.game.state import GameState
 
@@ -15,9 +16,9 @@ FEATURE_SCHEMA_ID = "zero-ttt-position-features-25x19x19-global5-v1"
 
 @dataclass(frozen=True, slots=True)
 class PositionFeatures:
-    board: np.ndarray
-    global_features: np.ndarray
-    legal: np.ndarray
+    board: NDArray[np.float32]
+    global_features: NDArray[np.float32]
+    legal: NDArray[np.bool_]
 
     def __post_init__(self) -> None:
         if self.board.shape != (POINT_FEATURES, BOARD_SIZE, BOARD_SIZE):

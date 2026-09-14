@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from zero_ttt.config import load_config
 from zero_ttt.game.rules import BOARD_AREA
 from zero_ttt.model.execution import BlockExecutor
-from zero_ttt.model.interfaces import BlockOutput, NoOpBlockResidualPlugin
+from zero_ttt.model.interfaces import BlockOutput, BlockResidualPlugin, NoOpBlockResidualPlugin
 from zero_ttt.model.rope import AxialRoPE2D
 from zero_ttt.model.tokens import TokenLayout
 
@@ -28,7 +28,12 @@ def test_checkpoint_executor_preserves_rng_during_recomputation() -> None:
             super().__init__()
             self.scale = nn.Parameter(torch.tensor(1.0))
 
-        def forward(self, hidden, rope, plugin):
+        def forward(
+            self,
+            hidden: torch.Tensor,
+            rope: AxialRoPE2D,
+            plugin: BlockResidualPlugin,
+        ) -> BlockOutput:
             del rope, plugin
             output = F.dropout(hidden, p=0.5, training=True) * self.scale
             zero = output.new_zeros(())
@@ -67,6 +72,14 @@ def test_checkpoint_executor_preserves_rng_during_recomputation() -> None:
     )
     eager_output.hidden.sum().backward()
     checkpoint_output.hidden.sum().backward()
+    eager_hidden_gradient = eager_hidden.grad
+    checkpoint_hidden_gradient = checkpoint_hidden.grad
+    eager_scale_gradient = eager_block.scale.grad
+    checkpoint_scale_gradient = checkpoint_block.scale.grad
+    assert eager_hidden_gradient is not None
+    assert checkpoint_hidden_gradient is not None
+    assert eager_scale_gradient is not None
+    assert checkpoint_scale_gradient is not None
     assert torch.equal(eager_output.hidden, checkpoint_output.hidden)
-    assert torch.equal(eager_hidden.grad, checkpoint_hidden.grad)
-    assert torch.equal(eager_block.scale.grad, checkpoint_block.scale.grad)
+    assert torch.equal(eager_hidden_gradient, checkpoint_hidden_gradient)
+    assert torch.equal(eager_scale_gradient, checkpoint_scale_gradient)

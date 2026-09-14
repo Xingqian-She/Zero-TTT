@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+from numpy.typing import NDArray
 from zero_ttt.game.features import GLOBAL_FEATURES, POINT_FEATURES
 from zero_ttt.game.rules import ACTION_SIZE, BOARD_AREA, BOARD_SIZE
 
@@ -18,16 +19,16 @@ class TrainBatch:
     when a source cannot provide the corresponding target.
     """
 
-    board: np.ndarray
-    global_features: np.ndarray
-    legal: np.ndarray
-    policy: np.ndarray
-    value: np.ndarray
-    ownership: np.ndarray
-    score_margin: np.ndarray
-    value_mask: np.ndarray
-    ownership_mask: np.ndarray
-    score_mask: np.ndarray
+    board: NDArray[np.float32]
+    global_features: NDArray[np.float32]
+    legal: NDArray[np.bool_]
+    policy: NDArray[np.float32]
+    value: NDArray[np.float32]
+    ownership: NDArray[np.float32]
+    score_margin: NDArray[np.float32]
+    value_mask: NDArray[np.bool_]
+    ownership_mask: NDArray[np.bool_]
+    score_mask: NDArray[np.bool_]
 
     def __post_init__(self) -> None:
         if self.board.ndim != 4:
