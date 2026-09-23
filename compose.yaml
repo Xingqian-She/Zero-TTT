@@ -212,3 +212,21 @@ services:
     tmpfs:
       - /tmp
     command: ["python", "-m", "pytest", "-q"]
+
+  gpu-smoke:
+    profiles: ["dev"]
+    build: *dev-build
+    image: zero-ttt/dev:1.0.0
+    working_dir: /workspace
+    init: true
+    network_mode: none
+    gpus: all
+    shm_size: 8gb
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace
+        read_only: true
+    tmpfs:
+      - /tmp
+    command: ["python", "scripts/docker_smoke_test.py"]

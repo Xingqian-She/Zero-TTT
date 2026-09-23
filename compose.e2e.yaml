@@ -4,7 +4,7 @@ services:
     volumes:
       - e2e-control-state:/state/control
       - type: bind
-        source: ./configs
+        source: ./configs/acceptance
         target: /profiles
         read_only: true
 
@@ -49,6 +49,28 @@ services:
       - e2e-selfplay-artifacts:/datasets/artifacts/selfplay
       - e2e-control-state:/datasets/state/control
       - e2e-data-state:/datasets/state/data
+
+  e2e-driver:
+    profiles: ["dev"]
+    image: zero-ttt/dev:1.0.0
+    working_dir: /workspace
+    init: true
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: .
+        target: /workspace
+        read_only: true
+      - e2e-root:/datasets
+      - e2e-raw:/datasets/raw
+      - e2e-work:/datasets/work
+      - e2e-data-artifacts:/datasets/artifacts/data:ro
+      - e2e-model-artifacts:/datasets/artifacts/models:ro
+      - e2e-selfplay-artifacts:/datasets/artifacts/selfplay:ro
+    tmpfs:
+      - /tmp
+    command: ["python", "scripts/compose_e2e_test.py", "prepare", "/datasets"]
 
 volumes:
   e2e-root:

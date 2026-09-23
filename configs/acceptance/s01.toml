@@ -1,0 +1,87 @@
+schema_version = 8
+seed = 7
+
+[game]
+board_size = 19
+komi_half_points = 15
+max_moves = 2
+history_length = 8
+
+[model]
+input_planes = 25
+global_features = 5
+d_model = 64
+n_heads = 4
+n_layers = 2
+d_ff = 128
+
+[model.rope]
+base = 100.0
+scale = 1.0
+rotary_dim = 16
+centered = true
+learnable = false
+
+[model.hypernet]
+enabled = true
+num_layers = 1
+rank = 4
+hidden_dim = 16
+context_gradient_scale = 0.1
+
+[model.depth_mixing]
+enabled = true
+dilation = 1
+period = 1
+
+[training]
+batch_size = 2
+accumulation_steps = 1
+learning_rate = 0.001
+beta1 = 0.9
+beta2 = 0.95
+eps = 1e-8
+weight_decay = 0.01
+warmup_samples = 8
+gradient_clip = 1.0
+policy_loss_weight = 1.0
+value_loss_weight = 1.0
+ownership_loss_weight = 0.15
+score_loss_weight = 0.05
+ema_half_life_samples = 32
+ema_update_interval_samples = 4
+publish_interval_samples = 8
+checkpoint_keep = 2
+
+[training.hypernet]
+learning_rate_multiplier = 0.1
+gradient_clip = 0.1
+
+[training.mixture]
+selfplay_weight = 0.8
+cold_start_weight = 0.2
+
+[execution]
+activation_checkpoint = false
+activation_checkpoint_stride = 2
+compile_model = false
+compile_mode = "default"
+
+[search]
+max_simulations = 2
+uct_c = 1.41
+dirichlet_epsilon = 0.25
+dirichlet_alpha = 0.03
+temperature = 0.0
+temperature_drop_ply = 0
+
+[selfplay]
+actor_count = 4
+inference_batch_size = 4
+batch_wait_ms = 10.0
+inference_cache_size = 32768
+compile_inference = false
+
+[runtime]
+device = "cuda"
+ema_device = "cpu"

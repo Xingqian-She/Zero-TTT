@@ -45,9 +45,6 @@ CMD ["zero-ttt-selfplay-worker"]
 FROM selfplay AS dev
 COPY docker/services/dev.requirements.lock ./dev.requirements.lock
 COPY services ./services
-COPY configs ./configs
-COPY scripts ./scripts
-COPY tests ./tests
 COPY tools ./tools
 COPY pyproject.toml uv.lock README.md ./
 RUN python -m pip install --break-system-packages --no-cache-dir \
@@ -67,4 +64,8 @@ ENV PATH="/opt/pyright-node/bin:${PATH}" \
     PYTEST_ADDOPTS="-o cache_dir=/tmp/pytest-cache" \
     RUFF_CACHE_DIR=/tmp/ruff-cache
 RUN pyright --version
+# Acceptance scripts/configs change frequently; keep them after dependency installation.
+COPY configs ./configs
+COPY scripts ./scripts
+COPY tests ./tests
 CMD ["/bin/bash"]

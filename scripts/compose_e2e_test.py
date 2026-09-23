@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from zero_ttt.config import config_from_mapping, load_config
+from zero_ttt_contracts import ArtifactRef
+from zero_ttt_dataset import LocalArtifactStore
 from zero_ttt_dataset.records import stable_game_id
 
 RUN_NAME = "compose-e2e"
@@ -124,7 +127,7 @@ def _require_empty_control(client: httpx.Client) -> None:
         raise RuntimeError("isolated Control state is not empty")
 
 
-def recovery_start(client: httpx.Client, state_path: Path) -> None:
+def recovery_start(client: httpx.Client, state_path: Path) -> dict[str, Any]:
     """Act as a worker that disappears while holding the first bootstrap lease."""
     _require_empty_control(client)
     workflow_id = _submit(client, "data-bootstrap", parameters=BOOTSTRAP_PARAMETERS)
@@ -165,9 +168,10 @@ def recovery_start(client: httpx.Client, state_path: Path) -> None:
         encoding="utf-8",
     )
     print(f"Worker disappeared holding job {job['job_id']}; restart Control and UI now.")
+    return {"workflow_id": workflow_id, "job_id": job["job_id"], "attempt": job["attempt"]}
 
 
-def recovery_check(client: httpx.Client, state_path: Path) -> None:
+def recovery_check(client: httpx.Client, state_path: Path) -> dict[str, Any]:
     state = json.loads(state_path.read_text(encoding="utf-8"))
     job = state["job"]
     restored = client.get(f"/api/v1/jobs/{job['job_id']}").raise_for_status().json()
@@ -205,9 +209,52 @@ def recovery_check(client: httpx.Client, state_path: Path) -> None:
     if response.status_code != 409:
         raise RuntimeError("an expired worker lease was allowed to renew")
     print("Active lease and event cursor survived restart; expired token rejected.")
+    return {
+        "active_lease_persisted": True,
+        "event_cursor_persisted": True,
+        "expired_token_status": 409,
+    }
 
 
-def bootstrap(client: httpx.Client, state_path: Path) -> None:
+def verify_training_job(
+    job: dict[str, Any], run_id: str, optimizer_step: int, effective_batch: int
+) -> None:
+    result = job["result"]
+    if (
+        job["run_id"] != run_id
+        or result.get("run_id") != run_id
+        or result.get("steps_executed") != 1
+        or result.get("optimizer_step") != optimizer_step
+        or result.get("samples_seen") != optimizer_step * effective_batch
+    ):
+        raise RuntimeError(f"training did not execute the requested step for this run: {job}")
+
+
+def verify_artifacts(client: httpx.Client, expected: dict[str, str]) -> list[dict[str, Any]]:
+    artifacts = client.get("/api/v1/artifacts").raise_for_status().json()["artifacts"]
+    by_id = {item["artifact_id"]: item for item in artifacts}
+    selected = []
+    store = LocalArtifactStore("/datasets/artifacts")
+    for artifact_id, kind in expected.items():
+        item = by_id.get(artifact_id)
+        if item is None or item["kind"] != kind:
+            raise RuntimeError(f"missing artifact for this workflow: {artifact_id} ({kind})")
+        store.verify(ArtifactRef.model_validate(item))
+        selected.append(item)
+    return selected
+
+
+def verify_profile(run: dict[str, Any], config_path: str) -> int:
+    expected = load_config(config_path)
+    actual = config_from_mapping(run["profile"])
+    if actual.sha256 != expected.sha256 or actual.runtime.device != "cuda":
+        raise RuntimeError("E2E Run did not freeze the requested CUDA configuration")
+    return actual.training.effective_batch_size
+
+
+def bootstrap(
+    client: httpx.Client, state_path: Path, profile_id: str, config_path: str
+) -> dict[str, Any]:
     recovery = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else None
     if recovery is None:
         _require_empty_control(client)
@@ -217,6 +264,8 @@ def bootstrap(client: httpx.Client, state_path: Path) -> None:
         parameters=BOOTSTRAP_PARAMETERS,
     )
     data_result = _wait_workflow(client, data_workflow)
+    if len(data_result["jobs"]) != 7:
+        raise RuntimeError("data-bootstrap must complete all seven jobs")
     if recovery is not None:
         first = data_result["jobs"][0]
         if (
@@ -234,7 +283,18 @@ def bootstrap(client: httpx.Client, state_path: Path) -> None:
         )
         if response.status_code != 409:
             raise RuntimeError("the old token was accepted after job recovery")
-    datasets = client.get("/api/v1/datasets").raise_for_status().json()["datasets"]
+    snapshot_ids = {
+        job["kind"].rsplit("-", 1)[-1]: f"dataset.{job['result']['snapshot_id']}"
+        for job in data_result["jobs"]
+        if job["kind"].startswith("data.snapshot-")
+    }
+    datasets = verify_artifacts(
+        client, {value: "dataset-snapshot" for value in snapshot_ids.values()}
+    )
+    if set(snapshot_ids) != {"train", "validation"} or any(
+        int(item["labels"]["games"]) <= 0 for item in datasets
+    ):
+        raise RuntimeError("bootstrap must create nonempty train and validation snapshots")
     cold = next(
         item
         for item in datasets
@@ -244,8 +304,9 @@ def bootstrap(client: httpx.Client, state_path: Path) -> None:
     run = _post(
         client,
         "/api/v1/runs",
-        {"name": RUN_NAME, "profile_id": "test", "cold_snapshot_id": cold["artifact_id"]},
+        {"name": RUN_NAME, "profile_id": profile_id, "cold_snapshot_id": cold["artifact_id"]},
     )
+    effective_batch = verify_profile(run, config_path)
     cold_workflow = _submit(
         client,
         "cold-start",
@@ -253,6 +314,16 @@ def bootstrap(client: httpx.Client, state_path: Path) -> None:
         parameters={"steps": 1},
     )
     cold_result = _wait_workflow(client, cold_workflow)
+    if len(cold_result["jobs"]) != 1:
+        raise RuntimeError("cold-start must contain exactly one training job")
+    verify_training_job(cold_result["jobs"][0], run["run_id"], 1, effective_batch)
+    artifacts = verify_artifacts(
+        client,
+        {
+            f"checkpoint.{run['run_id']}.1": "checkpoint",
+            f"publication.{run['run_id']}.1": "publication",
+        },
+    )
     publications = client.get("/api/v1/publications").raise_for_status().json()["publications"]
     if len(publications) != 1:
         raise RuntimeError("cold-start did not publish exactly one model")
@@ -260,24 +331,25 @@ def bootstrap(client: httpx.Client, state_path: Path) -> None:
     sequences = [int(event["sequence"]) for event in events]
     if not sequences or sequences != sorted(set(sequences)):
         raise RuntimeError("persistent event sequence is empty, duplicated, or unordered")
-    print(
-        json.dumps(
-            {
-                "data_workflow": data_result["workflow"]["state"],
-                "cold_workflow": cold_result["workflow"]["state"],
-                "run_id": run["run_id"],
-                "cold_snapshot": cold["artifact_id"],
-                "publication": publications[0]["artifact_id"],
-                "last_event_sequence": sequences[-1],
-            },
-            indent=2,
-        )
-    )
+    return {
+        "data_workflow": data_result["workflow"]["state"],
+        "cold_workflow": cold_result["workflow"]["state"],
+        "run_id": run["run_id"],
+        "cold_snapshot": cold["artifact_id"],
+        "publication": publications[0]["artifact_id"],
+        "last_event_sequence": sequences[-1],
+        "jobs": data_result["jobs"] + cold_result["jobs"],
+        "artifacts": datasets + artifacts,
+        "profile_sha256": run["profile_sha256"],
+        "config_sha256": load_config(config_path).sha256,
+        "device": "cuda",
+    }
 
 
-def alpha(client: httpx.Client) -> None:
+def alpha(client: httpx.Client, config_path: str) -> dict[str, Any]:
     runs = client.get("/api/v1/runs").raise_for_status().json()["runs"]
     run = next(item for item in runs if item["name"] == RUN_NAME)
+    effective_batch = verify_profile(run, config_path)
     before_events = (
         client.get("/api/v1/events", params={"after": 0}).raise_for_status().json()["events"]
     )
@@ -289,29 +361,45 @@ def alpha(client: httpx.Client) -> None:
         parameters={"games": 4, "steps": 1, "seed": 19},
     )
     result = _wait_workflow(client, workflow_id)
-    artifacts = client.get("/api/v1/artifacts").raise_for_status().json()["artifacts"]
-    kinds = [item["kind"] for item in artifacts]
-    for expected in ("selfplay-bundle", "dataset-snapshot", "checkpoint", "publication"):
-        if expected not in kinds:
-            raise RuntimeError(f"alpha-zero round did not produce {expected}")
+    jobs = {job["kind"]: job for job in result["jobs"]}
+    if len(result["jobs"]) != 4 or set(jobs) != {
+        "selfplay.collect",
+        "data.admit-selfplay",
+        "data.snapshot-selfplay",
+        "trainer.mixture",
+    }:
+        raise RuntimeError("alpha-zero round must complete exactly its four jobs")
+    verify_training_job(jobs["trainer.mixture"], run["run_id"], 2, effective_batch)
+    collection = jobs["selfplay.collect"]["result"]
+    if (
+        collection["sealed_games"] != 4
+        or collection["sealed_positions"] != 8
+        or collection["gpu_peak_allocated_bytes"] <= 0
+    ):
+        raise RuntimeError("E2E self-play did not execute the four-game CUDA budget")
+    artifacts = verify_artifacts(
+        client,
+        {
+            f"selfplay.{workflow_id}": "selfplay-bundle",
+            f"dataset.{jobs['data.snapshot-selfplay']['result']['snapshot_id']}": "dataset-snapshot",
+            f"checkpoint.{run['run_id']}.2": "checkpoint",
+            f"publication.{run['run_id']}.2": "publication",
+        },
+    )
     resumed = (
         client.get("/api/v1/events", params={"after": cursor}).raise_for_status().json()["events"]
     )
     sequences = [int(event["sequence"]) for event in resumed]
     if not sequences or min(sequences) <= cursor or sequences != sorted(set(sequences)):
         raise RuntimeError("event cursor did not resume strictly after the persisted checkpoint")
-    print(
-        json.dumps(
-            {
-                "alpha_workflow": result["workflow"]["state"],
-                "jobs": [job["kind"] for job in result["jobs"]],
-                "artifact_kinds": sorted(set(kinds)),
-                "resumed_event_count": len(resumed),
-                "last_event_sequence": sequences[-1],
-            },
-            indent=2,
-        )
-    )
+    return {
+        "alpha_workflow": result["workflow"]["state"],
+        "workflow_id": workflow_id,
+        "jobs": result["jobs"],
+        "artifacts": artifacts,
+        "resumed_event_count": len(resumed),
+        "last_event_sequence": sequences[-1],
+    }
 
 
 def main() -> None:
@@ -324,6 +412,8 @@ def main() -> None:
         "phase", choices=("recovery-start", "recovery-check", "bootstrap", "alpha")
     )
     run_command.add_argument("--url", default="http://control:8090")
+    run_command.add_argument("--profile-id", default="s01")
+    run_command.add_argument("--config", default="configs/acceptance/s01.toml")
     run_command.add_argument(
         "--recovery-state", type=Path, default=Path("/datasets/work/e2e-recovery.json")
     )
@@ -333,14 +423,22 @@ def main() -> None:
         return
     with httpx.Client(base_url=arguments.url, timeout=30.0) as client:
         if arguments.phase == "alpha":
-            alpha(client)
+            result = alpha(client, arguments.config)
+        elif arguments.phase == "bootstrap":
+            result = bootstrap(
+                client, arguments.recovery_state, arguments.profile_id, arguments.config
+            )
         else:
             phases = {
                 "recovery-start": recovery_start,
                 "recovery-check": recovery_check,
-                "bootstrap": bootstrap,
             }
-            phases[arguments.phase](client, arguments.recovery_state)
+            result = phases[arguments.phase](client, arguments.recovery_state)
+        output = json.dumps(result, indent=2)
+        (arguments.recovery_state.parent / f"e2e-{arguments.phase}-result.json").write_text(
+            output + "\n", encoding="utf-8"
+        )
+        print(output)
 
 
 if __name__ == "__main__":

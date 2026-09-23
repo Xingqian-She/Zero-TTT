@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import dataclasses
+import argparse
 import json
 import tempfile
 from dataclasses import asdict
@@ -18,28 +18,16 @@ from zero_ttt_trainer.checkpoint import CheckpointManager, checkpoint_metadata
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default="configs/acceptance/s01.toml")
+    arguments = parser.parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for the self-play GPU smoke test")
     configure_strict_fp32()
-    base = load_config("configs/test.toml")
-    config = dataclasses.replace(
-        base,
-        game=dataclasses.replace(base.game, max_moves=2),
-        search=dataclasses.replace(
-            base.search,
-            max_simulations=2,
-            temperature=0.0,
-            temperature_drop_ply=0,
-        ),
-        selfplay=dataclasses.replace(
-            base.selfplay,
-            actor_count=4,
-            inference_batch_size=4,
-            batch_wait_ms=10.0,
-            compile_inference=False,
-        ),
-        runtime=dataclasses.replace(base.runtime, device="cuda"),
-    )
+    config = load_config(arguments.config)
+    torch.manual_seed(config.seed)
+    if config.runtime.device != "cuda" or config.game.max_moves != 2:
+        raise ValueError("self-play smoke requires CUDA and a two-move budget")
 
     with tempfile.TemporaryDirectory(prefix="zero-ttt-selfplay-gpu-") as temporary:
         root = Path(temporary)
@@ -73,7 +61,12 @@ def main() -> None:
         assert gpu_peak > 0
         print(
             json.dumps(
-                {**asdict(summary), "gpu_peak_allocated_bytes": gpu_peak},
+                {
+                    **asdict(summary),
+                    "gpu_peak_allocated_bytes": gpu_peak,
+                    "config_sha256": config.sha256,
+                    "effective_config": json.loads(config.canonical_json()),
+                },
                 indent=2,
             )
         )

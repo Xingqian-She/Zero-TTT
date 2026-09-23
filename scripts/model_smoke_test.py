@@ -238,6 +238,7 @@ def run_case(
 ) -> dict[str, Any]:
     configure_strict_fp32()
     config = load_config(config_path)
+    torch.manual_seed(config.seed)
     if config.runtime.device != "cuda" or config.runtime.ema_device != "cpu":
         raise ValueError("the production smoke test requires CUDA fast weights and CPU EMA")
     if measured_optimizer_steps <= 0:
@@ -331,6 +332,8 @@ def run_case(
     inference_state = slow.state_dict()
     result = {
         "config": config_path,
+        "config_sha256": config.sha256,
+        "effective_config": json.loads(config.canonical_json()),
         "hypernet_enabled": config.model.hypernet.enabled,
         "depth_mixing_enabled": config.model.depth_mixing.enabled,
         "parameters": parameters,
@@ -342,6 +345,7 @@ def run_case(
         "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
         "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         "measured_optimizer_steps": measured_optimizer_steps,
+        "warmup_optimizer_steps": 1,
         "training_warmup_seconds": warmup_seconds,
         "training_warmup_peak_reserved_gib": warmup_peak_reserved_gib,
         "median_microbatch_seconds": statistics.median(measurement.microbatch_seconds),
